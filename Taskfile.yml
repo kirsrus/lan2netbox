@@ -1,0 +1,102 @@
+# Taskfile: сборка и обслуживание lan2netbox (https://taskfile.dev)
+version: '3'
+
+vars:
+  APP: lan2netbox
+  # Выходная директория для бинарников.
+  DIST: build
+  # Версия из последнего git-тега; при отсутствии тегов — хеш коммита.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo none
+  LDFLAGS: >-
+    -s -w
+    -X github.com/kirsrus/lan2netbox/internal/version.Version={{.VERSION}}
+    -X github.com/kirsrus/lan2netbox/internal/version.Commit={{.COMMIT}}
+
+tasks:
+  default:
+    desc: Сборка бинарников для Windows и Linux
+    cmds:
+      - task: build
+
+  build:
+    desc: Сборка бинарников для Windows и Linux в build/
+    cmds:
+      - task: prepare
+      - task: build-windows
+      - task: build-linux
+
+  prepare:
+    desc: Создание выходной директории
+    internal: true
+    cmds:
+      - cmd: mkdir -p {{.DIST}}
+        platforms: [linux]
+      - cmd: powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.DIST}}' | Out-Null"
+        platforms: [windows]
+
+  build-windows:
+    desc: Сборка бинарника для Windows (amd64)
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.DIST}}/{{.APP}}.exe .
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+
+  build-linux:
+    desc: Сборка бинарника для Linux (amd64)
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.DIST}}/{{.APP}} .
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+
+  run:
+    desc: Сборка и запуск приложения (для текущей ОС)
+    deps: [build]
+    cmds:
+      - cmd: ./{{.DIST}}/{{.APP}} run
+        platforms: [linux]
+      - cmd: ./{{.DIST}}/{{.APP}}.exe run
+        platforms: [windows]
+
+  version:
+    desc: Сборка и вывод версии (для текущей ОС)
+    deps: [build]
+    cmds:
+      - cmd: ./{{.DIST}}/{{.APP}} version
+        platforms: [linux]
+      - cmd: ./{{.DIST}}/{{.APP}}.exe version
+        platforms: [windows]
+
+  clean:
+    desc: Удаление выходной директории build/
+    cmds:
+      - cmd: rm -rf {{.DIST}}
+        platforms: [linux]
+      - cmd: powershell -NoProfile -Command "Remove-Item -Recurse -Force '{{.DIST}}' -ErrorAction SilentlyContinue"
+        platforms: [windows]
+
+  test:
+    desc: Запуск тестов
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: Статический анализ (golangci-lint)
+    cmds:
+      - golangci-lint run ./...
+
+  tidy:
+    desc: Обновление go.mod/go.sum
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: Форматирование исходников
+    cmds:
+      - gofmt -l -w .
