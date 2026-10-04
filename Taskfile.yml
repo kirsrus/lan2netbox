@@ -10,10 +10,14 @@ vars:
     sh: git describe --tags --always --dirty 2>/dev/null || echo dev
   COMMIT:
     sh: git rev-parse --short HEAD 2>/dev/null || echo none
+  # Дата сборки в локальном часовом поясе (RFC3339); при недоступности date — "unknown".
+  BUILD_DATE:
+    sh: date +%FT%T%:z 2>/dev/null || echo unknown
   LDFLAGS: >-
     -s -w
     -X github.com/kirsrus/lan2netbox/internal/version.Version={{.VERSION}}
     -X github.com/kirsrus/lan2netbox/internal/version.Commit={{.COMMIT}}
+    -X github.com/kirsrus/lan2netbox/internal/version.BuildDate={{.BUILD_DATE}}
 
 tasks:
   default:

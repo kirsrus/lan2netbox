@@ -3,7 +3,8 @@
 // Значения переменных заполняются на этапе компиляции через -ldflags:
 //
 //	go build -ldflags "-X github.com/kirsrus/lan2netbox/internal/version.Version=v1.2.3 \
-//	 -X github.com/kirsrus/lan2netbox/internal/version.Commit=abc1234"
+//	 -X github.com/kirsrus/lan2netbox/internal/version.Commit=abc1234 \
+//	 -X github.com/kirsrus/lan2netbox/internal/version.BuildDate=2026-10-03T19:00:00Z"
 package version
 
 import (
