@@ -1,13 +1,16 @@
 // Package zabbix — горутина синхронизации с Zabbix.
 //
-// Заглушка: регистрируется в оркестраторе internal/app, запускается,
-// ждёт отмены контекста и завершает работу.
+// Zabbix подписан на события device.discovered, device.updated,
+// device.deleted и link.changed. Интеграция пока заглушечная —
+// события логируются.
 package zabbix
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
+	"github.com/kirsrus/lan2netbox/internal/bus"
 	"github.com/kirsrus/lan2netbox/internal/config"
 )
 
@@ -15,11 +18,13 @@ import (
 type Zabbix struct {
 	logger *slog.Logger
 	cfg    config.ZabbixConfig
+	// bus — шина событий: подписка на события для синхронизации хостов.
+	bus *bus.Bus
 }
 
 // New создаёт компонент zabbix.
-func New(logger *slog.Logger, cfg config.ZabbixConfig) *Zabbix {
-	return &Zabbix{logger: logger, cfg: cfg}
+func New(logger *slog.Logger, cfg config.ZabbixConfig, bus *bus.Bus) *Zabbix {
+	return &Zabbix{logger: logger, cfg: cfg, bus: bus}
 }
 
 // Name возвращает имя компонента для оркестратора.
@@ -31,7 +36,17 @@ func (z *Zabbix) Run(ctx context.Context) error {
 		"url", z.cfg.URL,
 	)
 
-	<-ctx.Done()
+	// Подписка на события шины (заглушка: логирование). В дальнейшем —
+	// обновление хостов/интерфейсов Zabbix по событиям discovery.
+	if err := z.bus.ConsumeTopics(ctx, []bus.Topic{
+		bus.TopicDeviceDiscovered,
+		bus.TopicDeviceUpdated,
+		bus.TopicDeviceDeleted,
+		bus.TopicLinkChanged,
+	}, z.bus.LogHandler("zabbix")); err != nil {
+		return fmt.Errorf("zabbix: подписка на события: %w", err)
+	}
+
 	z.logger.Info("zabbix: остановлен")
 	return nil
 }

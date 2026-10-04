@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	"github.com/kirsrus/lan2netbox/internal/app"
+	"github.com/kirsrus/lan2netbox/internal/bus"
 	"github.com/kirsrus/lan2netbox/internal/config"
 	"github.com/kirsrus/lan2netbox/internal/version"
 	"github.com/kirsrus/lan2netbox/internal/workers/netbox"
@@ -69,17 +70,27 @@ func run(cmd *cobra.Command, _ []string) error {
 		logger.Info("конфигурация загружена", "path", path)
 	}
 
+	// Инициализация внутренней шины событий (watermill gochannel).
+	// Компоненты обмениваются событиями только через неё.
+	eventBus := bus.New(logger, bus.DefaultConfig())
+	defer eventBus.Close()
+	logger.Info("шина событий инициализирована",
+		"transport", "watermill/gochannel",
+		"topics", len(bus.AllTopics()),
+	)
+
 	// Сборка рабочих компонентов. Компоненты с enabled=false не запускаются.
+	// Каждый воркер получает ссылку на шину для публикации/подписки.
 	workers := []app.Worker{
-		sniffer.New(logger, cfg.Sniffer),
-		probe.New(logger, cfg.Probe),
+		sniffer.New(logger, cfg.Sniffer, eventBus),
+		probe.New(logger, cfg.Probe, eventBus),
 	}
 	if cfg.NetBox.Enabled {
-		workers = append(workers, netbox.New(logger, cfg.NetBox))
+		workers = append(workers, netbox.New(logger, cfg.NetBox, eventBus))
 	}
-	workers = append(workers, web.New(logger, cfg.Web))
+	workers = append(workers, web.New(logger, cfg.Web, eventBus))
 	if cfg.Zabbix.Enabled {
-		workers = append(workers, zabbix.New(logger, cfg.Zabbix))
+		workers = append(workers, zabbix.New(logger, cfg.Zabbix, eventBus))
 	}
 
 	// Запуск оркестратора. Блокируется до SIGINT/SIGTERM либо ошибки компонента.

@@ -1,13 +1,15 @@
 // Package netbox — горутина синхронизации с NetBox.
 //
-// Заглушка: регистрируется в оркестраторе internal/app, запускается,
-// ждёт отмены контекста и завершает работу.
+// NetBox подписан на события device.updated, device.deleted, link.changed
+// и sync.request. Обработка пока заглушечная — события логируются.
 package netbox
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
+	"github.com/kirsrus/lan2netbox/internal/bus"
 	"github.com/kirsrus/lan2netbox/internal/config"
 )
 
@@ -15,11 +17,13 @@ import (
 type NetBox struct {
 	logger *slog.Logger
 	cfg    config.NetBoxConfig
+	// bus — шина событий: подписка на изменения устройств/связей.
+	bus *bus.Bus
 }
 
 // New создаёт компонент netbox.
-func New(logger *slog.Logger, cfg config.NetBoxConfig) *NetBox {
-	return &NetBox{logger: logger, cfg: cfg}
+func New(logger *slog.Logger, cfg config.NetBoxConfig, bus *bus.Bus) *NetBox {
+	return &NetBox{logger: logger, cfg: cfg, bus: bus}
 }
 
 // Name возвращает имя компонента для оркестратора.
@@ -33,7 +37,18 @@ func (n *NetBox) Run(ctx context.Context) error {
 		"sync_interval", n.cfg.SyncInterval,
 	)
 
-	<-ctx.Done()
+	// Подписка на события шины (заглушка: логирование). В дальнейшем —
+	// поиск устройства в NetBox по MAC, автосоздание устройств с ролями/
+	// типами, интерфейсами и кабелями, маппинг локальный MAC ↔ NetBox ID.
+	if err := n.bus.ConsumeTopics(ctx, []bus.Topic{
+		bus.TopicDeviceUpdated,
+		bus.TopicDeviceDeleted,
+		bus.TopicLinkChanged,
+		bus.TopicSyncRequest,
+	}, n.bus.LogHandler("netbox")); err != nil {
+		return fmt.Errorf("netbox: подписка на события: %w", err)
+	}
+
 	n.logger.Info("netbox: остановлен")
 	return nil
 }
