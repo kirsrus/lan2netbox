@@ -1,0 +1,80 @@
+# lan2netbox — пример конфигурации.
+# Скопируйте в configs/config.yaml и отредактируйте под своё окружение.
+#
+# Все значения, отсутствующие в файле, берутся из значений по умолчанию
+# (см. internal/config.Default).
+
+# Локальная база данных (bbolt).
+store:
+  path: data/lan2netbox.db
+
+# Обнаружение устройств (горутина sniffer).
+sniffer:
+  # Сетевой интерфейс для захвата пакетов (Windows: "Ethernet", Linux: "eth0").
+  # Пусто — автоматический выбор.
+  interface: ""
+  # Подсети для активного ARP-скана (CIDR). Пусто — подсети выбранного интерфейса.
+  subnets:
+    - 192.168.1.0/24
+  # Периодичность активного ARP-скана.
+  scan_interval: 60s
+  # Устройство без активности дольше этого времени — кандидат на удаление.
+  offline_timeout: 10m
+  # Протоколы пассивного захвата.
+  capture: [arp, dhcp, mdns]
+
+# Опрос устройств (горутина probe).
+probe:
+  # Период опроса доступных устройств.
+  interval: 5m
+  # Начальная задержка повторного опроса недоступного устройства.
+  retry_initial: 30s
+  # Максимальная задержка повторного опроса (backoff).
+  retry_max: 30m
+  # Плагины-опросчики.
+  plugins:
+    # SNMP (gosnmp).
+    snmp:
+      enabled: true
+      community: public
+      version: 2c          # 1 | 2c | 3
+      username: ""         # SNMPv3: имя пользователя
+      password: ""         # SNMPv3: пароль
+      port: 161
+      timeout: 3s
+      retries: 2
+    # Опрос WEB-интерфейсов.
+    http:
+      enabled: true
+      ports: [80, 443, 8080, 8443]
+      timeout: 5s
+    # NETCONF (заглушка).
+    netconf:
+      enabled: false
+      port: 830
+
+# Синхронизация с NetBox (горутина netbox).
+netbox:
+  enabled: true
+  url: https://netbox.example.com
+  token: замените-на-API-токен
+  sync_interval: 15m       # 0 — синхронизация только по событиям
+  auto_create: true        # автосоздание отсутствующих устройств
+  insecure_tls: false      # отключить проверку TLS-сертификата
+
+# Web-интерфейс (горутина web).
+web:
+  listen: 0.0.0.0:8080
+  templates_dir: web/templates
+  static_dir: web/static
+
+# Синхронизация с Zabbix (горутина zabbix, заглушка).
+zabbix:
+  enabled: false
+  url: ""
+
+# Логирование.
+logging:
+  level: info               # debug | info | warn | error
+  format: text              # text | json | auto
+  file: ""                  # пусто — stderr
