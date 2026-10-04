@@ -23,6 +23,9 @@ func TestDefault(t *testing.T) {
 	if !cfg.Probe.Plugins.SNMP.Enabled || cfg.Probe.Plugins.SNMP.Community != "public" {
 		t.Errorf("SNMP defaults не применены: %+v", cfg.Probe.Plugins.SNMP)
 	}
+	if cfg.NetBox.Enabled {
+		t.Error("NetBox.Enabled = true, want false (по умолчанию отключён)")
+	}
 	if !cfg.NetBox.AutoCreate {
 		t.Error("NetBox.AutoCreate = false, want true")
 	}
@@ -85,6 +88,52 @@ func TestLoadMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nope.yaml")
 	if _, err := Load(path); err == nil {
 		t.Fatal("Load(): ожидалась ошибка для отсутствующего файла")
+	}
+}
+
+func TestLoadOrDefaultMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nope.yaml")
+	cfg, usedDefaults, err := LoadOrDefault(path)
+	if err != nil {
+		t.Fatalf("LoadOrDefault(): %v", err)
+	}
+	if !usedDefaults {
+		t.Error("usedDefaults = false, want true")
+	}
+	if cfg.Web.Listen != "0.0.0.0:8080" || cfg.Sniffer.ScanInterval != 60*time.Second {
+		t.Errorf("ожидались значения по умолчанию: %+v", cfg)
+	}
+}
+
+func TestLoadOrDefaultExistingFile(t *testing.T) {
+	yaml := `
+sniffer:
+  scan_interval: 30s
+`
+	path := writeTemp(t, yaml)
+
+	cfg, usedDefaults, err := LoadOrDefault(path)
+	if err != nil {
+		t.Fatalf("LoadOrDefault(): %v", err)
+	}
+	if usedDefaults {
+		t.Error("usedDefaults = true, want false")
+	}
+	if cfg.Sniffer.ScanInterval != 30*time.Second {
+		t.Errorf("ScanInterval = %v, want 30s", cfg.Sniffer.ScanInterval)
+	}
+	// Значения по умолчанию для отсутствующих ключей должны сохраняться.
+	if cfg.Sniffer.OfflineTimeout != 10*time.Minute {
+		t.Errorf("OfflineTimeout = %v, want default 10m", cfg.Sniffer.OfflineTimeout)
+	}
+}
+
+func TestLoadOrDefaultInvalidFile(t *testing.T) {
+	yaml := "logging:\n  level: verbose\n"
+	path := writeTemp(t, yaml)
+
+	if _, _, err := LoadOrDefault(path); err == nil {
+		t.Fatal("LoadOrDefault(): ожидалась ошибка валидации для невалидного файла")
 	}
 }
 

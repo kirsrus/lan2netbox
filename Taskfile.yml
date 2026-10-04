@@ -59,13 +59,25 @@ tasks:
       GOARCH: amd64
       CGO_ENABLED: "0"
 
-  run:
-    desc: Сборка и запуск приложения (для текущей ОС)
-    deps: [build]
+  build-host:
+    desc: Сборка бинарника для текущей ОС
     cmds:
-      - cmd: ./{{.DIST}}/{{.APP}} run
+      - task: prepare
+      - cmd: go build -ldflags "{{.LDFLAGS}}" -o {{.DIST}}/{{.APP}} .
         platforms: [linux]
-      - cmd: ./{{.DIST}}/{{.APP}}.exe run
+      - cmd: go build -ldflags "{{.LDFLAGS}}" -o {{.DIST}}/{{.APP}}.exe .
+        platforms: [windows]
+
+  run:
+    desc: Сборка и запуск приложения (текущая ОС; без configs/config.yaml — значения по умолчанию)
+    deps: [build-host]
+    vars:
+      # Путь к файлу конфигурации: task run CONFIG=configs/my.yaml
+      CONFIG_FLAG: '{{if .CONFIG}}--config {{.CONFIG}}{{end}}'
+    cmds:
+      - cmd: ./{{.DIST}}/{{.APP}} run {{.CONFIG_FLAG}}
+        platforms: [linux]
+      - cmd: ./{{.DIST}}/{{.APP}}.exe run {{.CONFIG_FLAG}}
         platforms: [windows]
 
   version:

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -178,7 +179,8 @@ func Default() *Config {
 			},
 		},
 		NetBox: NetBoxConfig{
-			Enabled:      true,
+			// По умолчанию отключён: без URL и токена синхронизация невозможна.
+			Enabled:      false,
 			URL:          "",
 			Token:        "",
 			SyncInterval: 15 * time.Minute,
@@ -221,6 +223,34 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// LoadOrDefault читает YAML-конфигурацию из файла path, применяя значения
+// по умолчанию для отсутствующих ключей.
+//
+// Если файл не существует, возвращается конфигурация со значениями
+// по умолчанию (usedDefaults=true) и без ошибки — режим запуска
+// «из коробки». Ошибка возвращается только при невалидном содержимом
+// существующего файла.
+func LoadOrDefault(path string) (cfg *Config, usedDefaults bool, err error) {
+	cfg = Default()
+
+	v := viper.New()
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if os.IsNotExist(err) || errors.As(err, &notFound) {
+			return cfg, true, nil
+		}
+		return nil, false, fmt.Errorf("config: чтение файла %s: %w", path, err)
+	}
+	if err := v.Unmarshal(cfg); err != nil {
+		return nil, false, fmt.Errorf("config: разбор файла %s: %w", path, err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, false, fmt.Errorf("config: %s: %w", path, err)
+	}
+	return cfg, false, nil
 }
 
 // Validate проверяет корректность конфигурации и возвращает

@@ -1,9 +1,18 @@
 package cli
 
 import (
+	"context"
+	"fmt"
 	"runtime"
 
+	"github.com/kirsrus/lan2netbox/internal/app"
+	"github.com/kirsrus/lan2netbox/internal/config"
 	"github.com/kirsrus/lan2netbox/internal/version"
+	"github.com/kirsrus/lan2netbox/internal/workers/netbox"
+	"github.com/kirsrus/lan2netbox/internal/workers/probe"
+	"github.com/kirsrus/lan2netbox/internal/workers/sniffer"
+	"github.com/kirsrus/lan2netbox/internal/workers/web"
+	"github.com/kirsrus/lan2netbox/internal/workers/zabbix"
 	"github.com/kirsrus/lan2netbox/pkg/logging"
 	"github.com/spf13/cobra"
 )
@@ -15,13 +24,14 @@ func newRunCmd() *cobra.Command {
 		Short: "Запуск основного приложения",
 		Long: `Запускает все рабочие компоненты: sniffer, probe, netbox, web, zabbix.
 Приложение работает до получения сигнала завершения (SIGINT/SIGTERM).`,
+		Args: cobra.NoArgs,
 		RunE: run,
 	}
 }
 
-// run — запуск приложения.
-//
-// TODO: реализовать на этапе internal/app (оркестратор горутин, graceful shutdown).
+// run — запуск приложения: инициализация логирования, загрузка
+// конфигурации, сборка рабочих компонентов и запуск оркестратора
+// internal/app.
 func run(cmd *cobra.Command, _ []string) error {
 	logger, closeFn, err := logging.Setup(
 		flagString(cmd, "log-level"),
@@ -42,9 +52,38 @@ func run(cmd *cobra.Command, _ []string) error {
 		"platform", runtime.GOOS+"/"+runtime.GOARCH,
 	)
 
-	logger.Warn("команда \"run\" ещё не реализована")
+	// Загрузка конфигурации. При отсутствии файла используются
+	// значения по умолчанию — приложение запускается «из коробки».
+	path := flagString(cmd, "config")
+	if path == "" {
+		path = config.DefaultPath
+	}
+	cfg, usedDefaults, err := config.LoadOrDefault(path)
+	if err != nil {
+		return fmt.Errorf("загрузка конфигурации: %w", err)
+	}
+	if usedDefaults {
+		logger.Warn("файл конфигурации не найден, используются значения по умолчанию",
+			"path", path)
+	} else {
+		logger.Info("конфигурация загружена", "path", path)
+	}
 
-	return nil
+	// Сборка рабочих компонентов. Компоненты с enabled=false не запускаются.
+	workers := []app.Worker{
+		sniffer.New(logger, cfg.Sniffer),
+		probe.New(logger, cfg.Probe),
+	}
+	if cfg.NetBox.Enabled {
+		workers = append(workers, netbox.New(logger, cfg.NetBox))
+	}
+	workers = append(workers, web.New(logger, cfg.Web))
+	if cfg.Zabbix.Enabled {
+		workers = append(workers, zabbix.New(logger, cfg.Zabbix))
+	}
+
+	// Запуск оркестратора. Блокируется до SIGINT/SIGTERM либо ошибки компонента.
+	return app.New(logger, workers...).Run(context.Background())
 }
 
 // flagString возвращает значение строкового флага команды.
