@@ -1,4 +1,5 @@
 .vscode
+.example
 vendor/
 dumps/
 build/
