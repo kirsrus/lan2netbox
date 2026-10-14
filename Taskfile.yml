@@ -21,16 +21,16 @@ vars:
 
 tasks:
   default:
-    desc: Сборка бинарников для Windows и Linux
+    desc: Сборка бинарника для Linux
     cmds:
       - task: build
 
   build:
-    desc: Сборка бинарников для Windows и Linux в build/
+    desc: Сборка бинарника для Linux в build/
     cmds:
       - task: prepare
-      - task: build-windows
       - task: build-linux
+      - task: setcap
 
   prepare:
     desc: Создание выходной директории
@@ -41,15 +41,6 @@ tasks:
       - cmd: powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.DIST}}' | Out-Null"
         platforms: [windows]
 
-  build-windows:
-    desc: Сборка бинарника для Windows (amd64)
-    cmds:
-      - go build -ldflags "{{.LDFLAGS}}" -o {{.DIST}}/{{.APP}}.exe .
-    env:
-      GOOS: windows
-      GOARCH: amd64
-      CGO_ENABLED: "0"
-
   build-linux:
     desc: Сборка бинарника для Linux (amd64)
     cmds:
@@ -58,6 +49,13 @@ tasks:
       GOOS: linux
       GOARCH: amd64
       CGO_ENABLED: "0"
+
+  setcap:
+    desc: Установка привилегий cap_net_raw для бинарника
+    internal: true
+    cmds:
+      - cmd: sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service=eip {{.DIST}}/{{.APP}}
+        platforms: [linux]
 
   build-host:
     desc: Сборка бинарника для текущей ОС
@@ -69,25 +67,22 @@ tasks:
         platforms: [windows]
 
   run:
-    desc: Сборка и запуск приложения (текущая ОС; без configs/config.yaml — значения по умолчанию)
+    desc: Сборка и запуск приложения (Linux; без configs/config.yaml — значения по умолчанию)
     deps: [build-host]
     vars:
       # Путь к файлу конфигурации: task run CONFIG=configs/my.yaml
       CONFIG_FLAG: '{{if .CONFIG}}--config {{.CONFIG}}{{end}}'
     cmds:
+      - task: setcap
       - cmd: ./{{.DIST}}/{{.APP}} run {{.CONFIG_FLAG}}
         platforms: [linux]
-      - cmd: ./{{.DIST}}/{{.APP}}.exe run {{.CONFIG_FLAG}}
-        platforms: [windows]
 
   version:
-    desc: Сборка и вывод версии (для текущей ОС)
+    desc: Сборка и вывод версии (Linux)
     deps: [build]
     cmds:
       - cmd: ./{{.DIST}}/{{.APP}} version
         platforms: [linux]
-      - cmd: ./{{.DIST}}/{{.APP}}.exe version
-        platforms: [windows]
 
   clean:
     desc: Удаление выходной директории build/
