@@ -44,6 +44,9 @@ type SnifferConfig struct {
 	ScanInterval time.Duration `mapstructure:"scan_interval"`
 	// OfflineTimeout — время без активности, после которого устройство считается пропавшим.
 	OfflineTimeout time.Duration `mapstructure:"offline_timeout"`
+	// FlushInterval — периодичность синхронизации кэша обнаруженных
+	// устройств (MAC, MAC↔IP) с локальной БД SQLite.
+	FlushInterval time.Duration `mapstructure:"flush_interval"`
 	// Capture — протоколы пассивного захвата: arp, dhcp, mdns.
 	Capture []string `mapstructure:"capture"`
 }
@@ -152,6 +155,7 @@ func Default() *Config {
 			Subnets:        nil,
 			ScanInterval:   60 * time.Second,
 			OfflineTimeout: 10 * time.Minute,
+			FlushInterval:  5 * time.Second,
 			Capture:        []string{"arp", "dhcp", "mdns"},
 		},
 		Probe: ProbeConfig{
@@ -267,6 +271,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Sniffer.OfflineTimeout <= 0 {
 		errs = append(errs, errors.New("sniffer.offline_timeout: должно быть больше нуля"))
+	}
+	if c.Sniffer.FlushInterval <= 0 {
+		errs = append(errs, errors.New("sniffer.flush_interval: должно быть больше нуля"))
 	}
 	for _, s := range c.Sniffer.Subnets {
 		if _, _, err := net.ParseCIDR(s); err != nil {

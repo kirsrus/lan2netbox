@@ -35,6 +35,10 @@ const (
 	TopicDeviceUpdated Topic = "device.updated"
 	// TopicDeviceDeleted — устройство пропало из сети.
 	TopicDeviceDeleted Topic = "device.deleted"
+	// TopicDeviceSaved — запись MAC-адреса сохранена в локальной БД.
+	// Публикуется sniffer при синхронизации кэша с SQLite; пока
+	// подписчиков нет — событие-заглушка для будущих потребителей.
+	TopicDeviceSaved Topic = "device.saved"
 	// TopicLinkChanged — изменились связи устройство-коммутатор.
 	TopicLinkChanged Topic = "link.changed"
 	// TopicSyncRequest — принудительная синхронизация с NetBox (ручной запуск).
@@ -50,6 +54,7 @@ func AllTopics() []Topic {
 		TopicDeviceDiscovered,
 		TopicDeviceUpdated,
 		TopicDeviceDeleted,
+		TopicDeviceSaved,
 		TopicLinkChanged,
 		TopicSyncRequest,
 	}

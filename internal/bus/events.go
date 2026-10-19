@@ -45,6 +45,21 @@ type DeviceDeletedEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// DeviceSavedEvent — запись MAC-адреса сохранена в локальной БД
+// (топик TopicDeviceSaved, издатель: sniffer).
+//
+// Публикуется при каждой синхронизации кэша sniffer с SQLite.
+// Пока подписчиков нет — событие является заглушкой для будущих
+// потребителей (например, web-интерфейса или netbox).
+type DeviceSavedEvent struct {
+	// ID — идентификатор записи MAC в локальной БД (xid).
+	ID string `json:"id"`
+	// MAC — нормализованный MAC-адрес устройства.
+	MAC string `json:"mac"`
+	// Timestamp — время сохранения записи.
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // Link — связь устройство ↔ коммутатор.
 type Link struct {
 	// LocalMAC — MAC устройства, с которым связана запись.

@@ -1,8 +1,10 @@
 // Package sniffer — горутина обнаружения сетевых устройств.
 //
 // Sniffer — издатель событий шины: публикует device.discovered,
-// device.updated и device.deleted. Захват пакетов выполняется через
-// github.com/mdlayher/packet (AF_PACKET, Linux, без cgo).
+// device.updated, device.deleted и device.saved. Обнаруженные
+// MAC-адреса и связи MAC↔IP накапливаются в локальном кэше и
+// периодически сохраняются в БД SQLite. Захват пакетов выполняется
+// через github.com/mdlayher/packet (AF_PACKET, Linux, без cgo).
 // Обработчики пакетов (ARP, DHCP, mDNS) регистрируются в компоненте
 // и вызываются для каждого захваченного кадра.
 package sniffer
@@ -13,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/kirsrus/lan2netbox/internal/bus"
 	"github.com/kirsrus/lan2netbox/internal/config"
@@ -24,8 +27,8 @@ type Sniffer struct {
 	cfg    config.SnifferConfig
 	// bus — шина событий; используется для публикации найденных устройств.
 	bus *bus.Bus
-	// db — локальная база данных SQLite; будет использоваться для
-	// сохранения обнаруженных устройств (запросы добавятся позже).
+	// db — локальная база данных SQLite; используется для загрузки
+	// кэша устройств при старте и периодического сохранения изменений.
 	db *sql.DB
 	// handlers — зарегистрированные обработчики пакетов (ARP, DHCP, mDNS).
 	handlers []PacketHandler
@@ -50,11 +53,13 @@ func (s *Sniffer) RegisterHandler(h PacketHandler) {
 
 // Run запускает компонент и блокируется до отмены ctx.
 //
-// Определяет интерфейс захвата, создаёт AF_PACKET-сокет (Linux, без cgo,
-// github.com/mdlayher/packet) и запускает цикл чтения пакетов с передачей
-// их зарегистрированным обработчикам. Публикация device.discovered /
-// device.updated / device.deleted будет реализована вместе с обработчиками
-// DHCP/mDNS и активным ARP-сканом.
+// При старте загружает кэш обнаруженных устройств (таблицы mac и
+// mac_ip) из локальной БД SQLite. Определяет интерфейс захвата,
+// создаёт AF_PACKET-сокет (Linux, без cgo, github.com/mdlayher/packet)
+// и запускает цикл чтения пакетов с передачей их зарегистрированным
+// обработчикам. Параллельно работает горутина синхронизации: раз в
+// FlushInterval изменённые записи кэша сохраняются в БД, а id
+// сохранённых MAC-записей публикуются в шину (топик device.saved).
 func (s *Sniffer) Run(ctx context.Context) error {
 	// Определяем интерфейс захвата (из конфигурации или автоопределение).
 	iface, err := resolveInterface(s.cfg.Interface)
@@ -62,10 +67,20 @@ func (s *Sniffer) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Загружаем кэш обнаруженных устройств из локальной БД SQLite.
+	cache := newDeviceCache(s.db)
+	if err := cache.Load(); err != nil {
+		return fmt.Errorf("sniffer: загрузка кэша устройств: %w", err)
+	}
+	s.logger.Info("sniffer: кэш устройств загружен",
+		"macs", len(cache.macs),
+		"mac_ips", len(cache.macIPs),
+	)
+
 	// Обработчики: явно зарегистрированные или из конфигурации capture.
 	handlers := s.handlers
 	if len(handlers) == 0 {
-		handlers = s.newHandlers()
+		handlers = s.newHandlers(cache)
 	}
 	if len(handlers) == 0 {
 		s.logger.Warn("sniffer: не зарегистрировано ни одного обработчика пакетов",
@@ -78,25 +93,100 @@ func (s *Sniffer) Run(ctx context.Context) error {
 		"subnets", s.cfg.Subnets,
 		"scan_interval", s.cfg.ScanInterval,
 		"offline_timeout", s.cfg.OfflineTimeout,
+		"flush_interval", s.cfg.FlushInterval,
 		"capture", s.cfg.Capture,
 		"handlers", handlerNames(handlers),
 		"publishes", []string{
 			bus.TopicDeviceDiscovered.String(),
 			bus.TopicDeviceUpdated.String(),
 			bus.TopicDeviceDeleted.String(),
+			bus.TopicDeviceSaved.String(),
 		},
 	)
 
-	// Создаём AF_PACKET-сокет (mdlayher/packet) и запускаем цикл захвата.
+	// Создаём AF_PACKET-сокет (mdlayher/packet).
 	capture, err := newPacketCapture(s.logger, iface)
 	if err != nil {
 		return err
 	}
-	if err := capture.run(ctx, handlers); err != nil {
-		return fmt.Errorf("sniffer: захват пакетов: %w", err)
+
+	// Дочерний контекст: при завершении Run останавливаем горутину
+	// синхронизации кэша.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Горутина периодической синхронизации кэша с БД и публикации
+	// событий device.saved.
+	syncErr := make(chan error, 1)
+	go func() {
+		if err := s.syncLoop(ctx, cache); err != nil {
+			syncErr <- err
+		}
+	}()
+
+	// Цикл захвата пакетов (блокирующий).
+	captureErr := make(chan error, 1)
+	go func() {
+		captureErr <- capture.run(ctx, handlers)
+	}()
+
+	// Ожидаем завершения цикла захвата либо ошибки синхронизации.
+	select {
+	case err := <-captureErr:
+		if err != nil {
+			return fmt.Errorf("sniffer: захват пакетов: %w", err)
+		}
+	case err := <-syncErr:
+		return err
 	}
 
 	s.logger.Info("sniffer: остановлен")
+	return nil
+}
+
+// syncLoop периодически (раз в FlushInterval) сохраняет изменённые
+// записи кэша в БД и публикует события device.saved. Блокируется до
+// отмены ctx либо ошибки сохранения/публикации.
+func (s *Sniffer) syncLoop(ctx context.Context, cache *DeviceCache) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(s.cfg.FlushInterval):
+			if err := s.flushCache(ctx, cache); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// flushCache сохраняет изменённые записи кэша в БД и публикует в шину
+// событие device.saved для каждой сохранённой записи MAC-адреса.
+//
+// Пока подписчиков на топик нет — публикация является заглушкой для
+// будущих потребителей (web, netbox и т.п.).
+func (s *Sniffer) flushCache(ctx context.Context, cache *DeviceCache) error {
+	saved, err := cache.Flush()
+	if err != nil {
+		return err
+	}
+	if len(saved) == 0 {
+		return nil
+	}
+
+	s.logger.Info("sniffer: кэш синхронизирован с БД",
+		"saved_macs", len(saved),
+	)
+	for _, rec := range saved {
+		ev := bus.DeviceSavedEvent{
+			ID:        rec.id,
+			MAC:       rec.mac,
+			Timestamp: time.Now().UTC(),
+		}
+		if err := s.bus.Publish(ctx, bus.TopicDeviceSaved, ev); err != nil {
+			return fmt.Errorf("sniffer: публикация события %s: %w", bus.TopicDeviceSaved, err)
+		}
+	}
 	return nil
 }
 
@@ -104,12 +194,13 @@ func (s *Sniffer) Run(ctx context.Context) error {
 //
 // Сейчас реализован только ARP; DHCP и mDNS будут добавлены позже —
 // для них логируется предупреждение, чтобы конфигурация не «молчала».
-func (s *Sniffer) newHandlers() []PacketHandler {
+// Обработчики получают кэш устройств для записи обнаруженных MAC/IP.
+func (s *Sniffer) newHandlers(cache *DeviceCache) []PacketHandler {
 	var handlers []PacketHandler
 	for _, name := range s.cfg.Capture {
 		switch strings.ToLower(strings.TrimSpace(name)) {
 		case "arp":
-			handlers = append(handlers, NewARPHandler(s.logger))
+			handlers = append(handlers, NewARPHandler(s.logger, cache))
 		case "dhcp", "mdns":
 			s.logger.Warn("sniffer: обработчик ещё не реализован", "protocol", name)
 		default:

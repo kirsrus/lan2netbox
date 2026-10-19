@@ -49,7 +49,7 @@ func newTestLogger(buf *bytes.Buffer) *slog.Logger {
 
 func TestARPHandlerHandleRequest(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewARPHandler(newTestLogger(&buf))
+	h := NewARPHandler(newTestLogger(&buf), newDeviceCache(nil))
 
 	frame := buildARPPacket(t,
 		arpRequest,
@@ -70,7 +70,7 @@ func TestARPHandlerHandleRequest(t *testing.T) {
 
 func TestARPHandlerHandleReply(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewARPHandler(newTestLogger(&buf))
+	h := NewARPHandler(newTestLogger(&buf), newDeviceCache(nil))
 
 	frame := buildARPPacket(t,
 		arpReply,
@@ -91,7 +91,7 @@ func TestARPHandlerHandleReply(t *testing.T) {
 
 func TestARPHandlerIgnoresNonARP(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewARPHandler(newTestLogger(&buf))
+	h := NewARPHandler(newTestLogger(&buf), newDeviceCache(nil))
 
 	// Обычный IPv4-кадр (не ARP) — обработчик должен его проигнорировать.
 	h.Handle(buildIPv4Frame())

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"log/slog"
 	"net"
+	"time"
 )
 
 // Константы протокола ARP (RFC 826).
@@ -70,25 +71,41 @@ func parseARP(frame []byte) (*arpPacket, bool) {
 //
 // Выводит в лог (консоль) MAC-адреса, привязанные к ним IP-адреса
 // и запрашиваемые IP-адреса из ARP-запросов и ARP-ответов.
-// В дальнейшем на основе этих данных будут публиковаться события
-// device.discovered / device.updated.
+// Обнаруженные пары MAC↔IP (отправитель пакета) заносятся в локальный
+// кэш устройств; изменённые записи периодически сохраняются в БД
+// (см. DeviceCache.Flush), после чего публикуются события
+// device.discovered / device.updated / device.saved.
 type ARPHandler struct {
 	logger *slog.Logger
+	// cache — локальный кэш обнаруженных устройств; обновляется
+	// при появлении новых MAC-адресов и IP.
+	cache *DeviceCache
 }
 
 // NewARPHandler создаёт обработчик ARP-пакетов.
-func NewARPHandler(logger *slog.Logger) *ARPHandler {
-	return &ARPHandler{logger: logger}
+func NewARPHandler(logger *slog.Logger, cache *DeviceCache) *ARPHandler {
+	return &ARPHandler{logger: logger, cache: cache}
 }
 
 // Name возвращает имя обработчика.
 func (h *ARPHandler) Name() string { return "arp" }
 
-// Handle обрабатывает Ethernet-кадр: извлекает ARP-пакет и логирует его содержимое.
+// Handle обрабатывает Ethernet-кадр: извлекает ARP-пакет, обновляет
+// кэш устройств и логирует его содержимое.
 func (h *ARPHandler) Handle(frame []byte) {
 	arp, ok := parseARP(frame)
 	if !ok {
 		return
+	}
+
+	// Отправитель ARP-пакета достоверно присутствует в сети: обновляем
+	// кэш (MAC-адрес и связь MAC↔IP). Запись помечается как не
+	// синхронизированная с БД и будет сохранена при очередном Flush.
+	now := time.Now().UTC().Format(time.RFC3339)
+	macID := h.cache.UpsertMAC(arp.senderMAC.String(), now)
+	// Нулевой IP (0.0.0.0) не является адресом устройства — пропускаем.
+	if ip := arp.senderIP.String(); ip != "0.0.0.0" {
+		h.cache.UpsertMACIP(macID, ip, now)
 	}
 
 	switch arp.operation {

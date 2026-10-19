@@ -20,6 +20,9 @@ func TestDefault(t *testing.T) {
 	if cfg.Sniffer.OfflineTimeout != 10*time.Minute {
 		t.Errorf("Sniffer.OfflineTimeout = %v, want 10m", cfg.Sniffer.OfflineTimeout)
 	}
+	if cfg.Sniffer.FlushInterval != 5*time.Second {
+		t.Errorf("Sniffer.FlushInterval = %v, want 5s", cfg.Sniffer.FlushInterval)
+	}
 	if !cfg.Probe.Plugins.SNMP.Enabled || cfg.Probe.Plugins.SNMP.Community != "public" {
 		t.Errorf("SNMP defaults не применены: %+v", cfg.Probe.Plugins.SNMP)
 	}
@@ -72,6 +75,9 @@ netbox:
 	// Значения по умолчанию для отсутствующих ключей должны сохраняться.
 	if cfg.Sniffer.OfflineTimeout != 10*time.Minute {
 		t.Errorf("OfflineTimeout = %v, want default 10m", cfg.Sniffer.OfflineTimeout)
+	}
+	if cfg.Sniffer.FlushInterval != 5*time.Second {
+		t.Errorf("FlushInterval = %v, want default 5s", cfg.Sniffer.FlushInterval)
 	}
 	if len(cfg.Sniffer.Subnets) != 2 {
 		t.Errorf("Subnets = %v, want 2 элемента", cfg.Sniffer.Subnets)
@@ -141,6 +147,7 @@ func TestValidateErrors(t *testing.T) {
 	yaml := `
 sniffer:
   scan_interval: -5s
+  flush_interval: -1s
   capture: [llmnr]
 netbox:
   enabled: true
@@ -157,6 +164,7 @@ logging:
 	}
 	for _, want := range []string{
 		"sniffer.scan_interval",
+		"sniffer.flush_interval",
 		"sniffer.capture",
 		"netbox.url",
 		"netbox.token",
