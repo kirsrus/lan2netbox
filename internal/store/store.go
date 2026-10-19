@@ -18,7 +18,9 @@ import (
 // по указанному пути и возвращает пул соединений database/sql.
 //
 // Каталог для файла БД создаётся автоматически. Вызов Ping проверяет,
-// что база доступна и готова к работе.
+// что база доступна и готова к работе. При подключении применяются
+// миграции схемы (см. Migrate): таблицы создаются и обновляются
+// автоматически.
 func Open(path string) (*sql.DB, error) {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -34,5 +36,24 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: проверка соединения с БД %q: %w", path, err)
 	}
+
+	// SQLite поддерживает только одного писателя; ограничиваем пул одним
+	// соединением, чтобы PRAGMA (foreign_keys) гарантированно применялись
+	// ко всем операциям.
+	db.SetMaxOpenConns(1)
+
+	// Внешние ключи в SQLite выключены по умолчанию — включаем явно,
+	// чтобы работал ON DELETE CASCADE в таблице mac_ip.
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: включение внешних ключей: %w", err)
+	}
+
+	// Применяем миграции схемы: таблицы создаются/обновляются при подключении.
+	if err := Migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: миграция схемы БД %q: %w", path, err)
+	}
+
 	return db, nil
 }

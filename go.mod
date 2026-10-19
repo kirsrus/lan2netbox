@@ -6,6 +6,7 @@ require (
 	github.com/ThreeDotsLabs/watermill v1.5.3
 	github.com/glebarez/go-sqlite v1.23.0
 	github.com/mdlayher/packet v1.2.0
+	github.com/rs/xid v1.6.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/sys v0.48.0
