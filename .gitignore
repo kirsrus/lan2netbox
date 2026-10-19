@@ -12,3 +12,4 @@ __*
 servers.*
 !.golangci.yaml
 *.drawio
+*.sqlite

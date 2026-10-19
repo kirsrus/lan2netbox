@@ -8,6 +8,7 @@ import (
 	"github.com/kirsrus/lan2netbox/internal/app"
 	"github.com/kirsrus/lan2netbox/internal/bus"
 	"github.com/kirsrus/lan2netbox/internal/config"
+	"github.com/kirsrus/lan2netbox/internal/store"
 	"github.com/kirsrus/lan2netbox/internal/version"
 	"github.com/kirsrus/lan2netbox/internal/workers/netbox"
 	"github.com/kirsrus/lan2netbox/internal/workers/probe"
@@ -79,10 +80,23 @@ func run(cmd *cobra.Command, _ []string) error {
 		"topics", len(bus.AllTopics()),
 	)
 
+	// Инициализация локальной базы данных SQLite (cznic/sqlite через
+	// обёртку glebarez/go-sqlite). Экземпляр *sql.DB передаётся
+	// компонентам, которым нужен доступ к хранилищу.
+	db, err := store.Open(cfg.Store.Path)
+	if err != nil {
+		return fmt.Errorf("инициализация базы данных: %w", err)
+	}
+	defer db.Close()
+	logger.Info("база данных инициализирована",
+		"path", cfg.Store.Path,
+		"driver", "sqlite",
+	)
+
 	// Сборка рабочих компонентов. Компоненты с enabled=false не запускаются.
 	// Каждый воркер получает ссылку на шину для публикации/подписки.
 	workers := []app.Worker{
-		sniffer.New(logger, cfg.Sniffer, eventBus),
+		sniffer.New(logger, cfg.Sniffer, eventBus, db),
 		probe.New(logger, cfg.Probe, eventBus),
 	}
 	if cfg.NetBox.Enabled {

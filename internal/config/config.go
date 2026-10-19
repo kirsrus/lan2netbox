@@ -28,7 +28,7 @@ type Config struct {
 	Logging LoggingConfig `mapstructure:"logging"`
 }
 
-// StoreConfig — локальная база данных (bbolt).
+// StoreConfig — локальная база данных (SQLite).
 type StoreConfig struct {
 	// Path — путь к файлу БД.
 	Path string `mapstructure:"path"`
@@ -146,7 +146,7 @@ type LoggingConfig struct {
 // Default возвращает конфигурацию со значениями по умолчанию.
 func Default() *Config {
 	return &Config{
-		Store: StoreConfig{Path: "data/lan2netbox.db"},
+		Store: StoreConfig{Path: "database.sqlite"},
 		Sniffer: SnifferConfig{
 			Interface:      "",
 			Subnets:        nil,

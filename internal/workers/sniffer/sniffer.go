@@ -9,6 +9,7 @@ package sniffer
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -23,13 +24,16 @@ type Sniffer struct {
 	cfg    config.SnifferConfig
 	// bus — шина событий; используется для публикации найденных устройств.
 	bus *bus.Bus
+	// db — локальная база данных SQLite; будет использоваться для
+	// сохранения обнаруженных устройств (запросы добавятся позже).
+	db *sql.DB
 	// handlers — зарегистрированные обработчики пакетов (ARP, DHCP, mDNS).
 	handlers []PacketHandler
 }
 
 // New создаёт компонент sniffer.
-func New(logger *slog.Logger, cfg config.SnifferConfig, bus *bus.Bus) *Sniffer {
-	return &Sniffer{logger: logger, cfg: cfg, bus: bus}
+func New(logger *slog.Logger, cfg config.SnifferConfig, bus *bus.Bus, db *sql.DB) *Sniffer {
+	return &Sniffer{logger: logger, cfg: cfg, bus: bus, db: db}
 }
 
 // Name возвращает имя компонента для оркестратора.

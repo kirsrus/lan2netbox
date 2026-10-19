@@ -11,8 +11,8 @@ import (
 func TestDefault(t *testing.T) {
 	cfg := Default()
 
-	if cfg.Store.Path != "data/lan2netbox.db" {
-		t.Errorf("Store.Path = %q, want data/lan2netbox.db", cfg.Store.Path)
+	if cfg.Store.Path != "database.sqlite" {
+		t.Errorf("Store.Path = %q, want database.sqlite", cfg.Store.Path)
 	}
 	if cfg.Sniffer.ScanInterval != 60*time.Second {
 		t.Errorf("Sniffer.ScanInterval = %v, want 60s", cfg.Sniffer.ScanInterval)

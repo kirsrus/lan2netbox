@@ -4,9 +4,9 @@
 # Все значения, отсутствующие в файле, берутся из значений по умолчанию
 # (см. internal/config.Default).
 
-# Локальная база данных (bbolt).
+# Локальная база данных (SQLite).
 store:
-  path: data/lan2netbox.db
+  path: database.sqlite
 
 # Обнаружение устройств (горутина sniffer).
 sniffer:
