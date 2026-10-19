@@ -2,7 +2,7 @@
 //
 // Sniffer — издатель событий шины: публикует device.discovered,
 // device.updated и device.deleted. Захват пакетов выполняется через
-// github.com/google/gopacket/afpacket (AF_PACKET, Linux, без cgo).
+// github.com/mdlayher/packet (AF_PACKET, Linux, без cgo).
 // Обработчики пакетов (ARP, DHCP, mDNS) регистрируются в компоненте
 // и вызываются для каждого захваченного кадра.
 package sniffer
@@ -46,11 +46,11 @@ func (s *Sniffer) RegisterHandler(h PacketHandler) {
 
 // Run запускает компонент и блокируется до отмены ctx.
 //
-// Определяет интерфейс захвата, создаёт AF_PACKET-сокет (Linux) и
-// запускает цикл чтения пакетов с передачей их зарегистрированным
-// обработчикам. Публикация device.discovered / device.updated /
-// device.deleted будет реализована вместе с обработчиками DHCP/mDNS
-// и активным ARP-сканом.
+// Определяет интерфейс захвата, создаёт AF_PACKET-сокет (Linux, без cgo,
+// github.com/mdlayher/packet) и запускает цикл чтения пакетов с передачей
+// их зарегистрированным обработчикам. Публикация device.discovered /
+// device.updated / device.deleted будет реализована вместе с обработчиками
+// DHCP/mDNS и активным ARP-сканом.
 func (s *Sniffer) Run(ctx context.Context) error {
 	// Определяем интерфейс захвата (из конфигурации или автоопределение).
 	iface, err := resolveInterface(s.cfg.Interface)
@@ -83,7 +83,7 @@ func (s *Sniffer) Run(ctx context.Context) error {
 		},
 	)
 
-	// Создаём AF_PACKET-сокет и запускаем цикл захвата.
+	// Создаём AF_PACKET-сокет (mdlayher/packet) и запускаем цикл захвата.
 	capture, err := newPacketCapture(s.logger, iface)
 	if err != nil {
 		return err

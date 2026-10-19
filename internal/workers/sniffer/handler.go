@@ -2,12 +2,10 @@
 //
 // Sniffer — издатель событий шины: публикует device.discovered,
 // device.updated и device.deleted. Захват пакетов выполняется через
-// github.com/google/gopacket/afpacket (AF_PACKET, Linux, без cgo).
+// github.com/mdlayher/packet (AF_PACKET, Linux, без cgo).
 // Обработчики пакетов (ARP, DHCP, mDNS) регистрируются в компоненте
 // и вызываются для каждого захваченного кадра.
 package sniffer
-
-import "github.com/google/gopacket"
 
 // PacketHandler — обработчик захваченных пакетов.
 //
@@ -19,8 +17,10 @@ type PacketHandler interface {
 	// Name возвращает имя обработчика (протокола) для логов.
 	Name() string
 
-	// Handle вызывается для каждого захваченного пакета.
+	// Handle вызывается для каждого захваченного Ethernet-кадра.
 	// Реализация должна быть быстрой и не блокирующей: цикл захвата
 	// синхронно вызывает все зарегистрированные обработчики.
-	Handle(pkt gopacket.Packet)
+	// Слайс frame валиден только на время вызова — при необходимости
+	// обработчик должен скопировать нужные ему данные.
+	Handle(frame []byte)
 }

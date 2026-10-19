@@ -2,39 +2,44 @@ package sniffer
 
 import (
 	"bytes"
+	"encoding/binary"
 	"log/slog"
 	"net"
 	"strings"
 	"testing"
-
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 )
 
-// buildARPPacket собирает Ethernet-кадр с ARP-пакетом для тестов.
-func buildARPPacket(t *testing.T, op uint16, srcMAC, dstMAC net.HardwareAddr, srcIP, dstIP net.IP) gopacket.Packet {
+// buildARPPacket собирает Ethernet-кадр с ARP-пакетом (Ethernet/IPv4) для тестов.
+func buildARPPacket(t *testing.T, op uint16, srcMAC, dstMAC net.HardwareAddr, srcIP, dstIP net.IP) []byte {
 	t.Helper()
-	eth := &layers.Ethernet{
-		SrcMAC:       srcMAC,
-		DstMAC:       dstMAC,
-		EthernetType: layers.EthernetTypeARP,
-	}
-	arp := &layers.ARP{
-		AddrType:          layers.LinkTypeEthernet,
-		Protocol:          layers.EthernetTypeIPv4,
-		HwAddressSize:     6,
-		ProtAddressSize:   4,
-		Operation:         op,
-		SourceHwAddress:   srcMAC,
-		SourceProtAddress: srcIP,
-		DstHwAddress:      dstMAC,
-		DstProtAddress:    dstIP,
-	}
-	buf := gopacket.NewSerializeBuffer()
-	if err := gopacket.SerializeLayers(buf, gopacket.SerializeOptions{}, eth, arp); err != nil {
-		t.Fatalf("сборка ARP-кадра: %v", err)
-	}
-	return gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
+	frame := make([]byte, ethHeaderLen+arpPacketLen)
+
+	// Ethernet-заголовок: dst(6) + src(6) + ethertype(2).
+	copy(frame[0:6], dstMAC)
+	copy(frame[6:12], srcMAC)
+	binary.BigEndian.PutUint16(frame[12:14], etherTypeARP)
+
+	// ARP-пакет.
+	p := frame[ethHeaderLen:]
+	binary.BigEndian.PutUint16(p[0:2], 1)      // HType: Ethernet
+	binary.BigEndian.PutUint16(p[2:4], 0x0800) // PType: IPv4
+	p[4] = 6                                   // HLEN: 6 байт
+	p[5] = 4                                   // PLEN: 4 байта
+	binary.BigEndian.PutUint16(p[6:8], op)     // Operation
+	copy(p[8:14], srcMAC)                      // SHA
+	copy(p[14:18], srcIP.To4())                // SPA
+	copy(p[18:24], dstMAC)                     // THA
+	copy(p[24:28], dstIP.To4())                // TPA
+	return frame
+}
+
+// buildIPv4Frame собирает обычный IPv4-кадр (не ARP) для тестов.
+func buildIPv4Frame() []byte {
+	frame := make([]byte, ethHeaderLen+20)
+	copy(frame[0:6], net.HardwareAddr{0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee})
+	copy(frame[6:12], net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55})
+	binary.BigEndian.PutUint16(frame[12:14], 0x0800) // EtherType: IPv4
+	return frame
 }
 
 // newTestLogger возвращает логгер, пишущий в буфер.
@@ -46,14 +51,14 @@ func TestARPHandlerHandleRequest(t *testing.T) {
 	var buf bytes.Buffer
 	h := NewARPHandler(newTestLogger(&buf))
 
-	pkt := buildARPPacket(t,
-		layers.ARPRequest,
+	frame := buildARPPacket(t,
+		arpRequest,
 		net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
 		net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 		net.IP{192, 168, 1, 10},
 		net.IP{192, 168, 1, 1},
 	)
-	h.Handle(pkt)
+	h.Handle(frame)
 
 	out := buf.String()
 	for _, want := range []string{"ARP-запрос", "00:11:22:33:44:55", "192.168.1.10", "192.168.1.1"} {
@@ -67,14 +72,14 @@ func TestARPHandlerHandleReply(t *testing.T) {
 	var buf bytes.Buffer
 	h := NewARPHandler(newTestLogger(&buf))
 
-	pkt := buildARPPacket(t,
-		layers.ARPReply,
+	frame := buildARPPacket(t,
+		arpReply,
 		net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
 		net.HardwareAddr{0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee},
 		net.IP{192, 168, 1, 1},
 		net.IP{192, 168, 1, 10},
 	)
-	h.Handle(pkt)
+	h.Handle(frame)
 
 	out := buf.String()
 	for _, want := range []string{"ARP-ответ", "00:11:22:33:44:55", "192.168.1.1", "00:aa:bb:cc:dd:ee"} {
@@ -89,30 +94,17 @@ func TestARPHandlerIgnoresNonARP(t *testing.T) {
 	h := NewARPHandler(newTestLogger(&buf))
 
 	// Обычный IPv4-кадр (не ARP) — обработчик должен его проигнорировать.
-	eth := &layers.Ethernet{
-		SrcMAC:       net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
-		DstMAC:       net.HardwareAddr{0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee},
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-	ip := &layers.IPv4{
-		Version:  4,
-		IHL:      5,
-		TTL:      64,
-		Protocol: layers.IPProtocolICMPv4,
-		SrcIP:    net.IP{192, 168, 1, 10},
-		DstIP:    net.IP{192, 168, 1, 1},
-	}
-	icmp := &layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0)}
-	serBuf := gopacket.NewSerializeBuffer()
-	if err := gopacket.SerializeLayers(serBuf, gopacket.SerializeOptions{}, eth, ip, icmp); err != nil {
-		t.Fatalf("сборка IPv4-кадра: %v", err)
-	}
-	pkt := gopacket.NewPacket(serBuf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
-
-	h.Handle(pkt)
+	h.Handle(buildIPv4Frame())
 
 	if out := buf.String(); out != "" {
 		t.Errorf("не-ARP пакет не должен логироваться, получено:\n%s", out)
+	}
+}
+
+func TestParseARPRejectsShortFrame(t *testing.T) {
+	// Кадр короче Ethernet-заголовка + ARP-пакета — должен быть отклонён.
+	if _, ok := parseARP([]byte{0x00, 0x11, 0x22}); ok {
+		t.Error("короткий кадр не должен распознаваться как ARP")
 	}
 }
 
